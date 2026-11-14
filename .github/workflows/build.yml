@@ -81,28 +81,55 @@ jobs:
           
           cat > app/src/main/java/com/aimbot/app/MainActivity.java <<'EOF'
           package com.aimbot.app;
-          import android.app.Activity; import android.content.*; import android.os.*; import android.net.Uri; import android.provider.Settings; import android.widget.*;
+          import android.app.Activity; import android.content.*; import android.media.projection.*; import android.os.*; import android.net.Uri; import android.provider.Settings; import android.widget.*;
           public class MainActivity extends Activity {
+              private static final int REQ_OVERLAY = 101;
+              private static final int REQ_CAPTURE = 102;
               protected void onCreate(Bundle b) {
                   super.onCreate(b);
                   LinearLayout l = new LinearLayout(this); Button btn = new Button(this);
                   btn.setText("INJETAR"); l.addView(btn); setContentView(l);
                   btn.setOnClickListener(v -> {
                       if (!Settings.canDrawOverlays(this)) {
-                          startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                          startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())), REQ_OVERLAY);
                       } else {
-                          startForegroundService(new Intent(this, OverlayService.class));
-                          try { Intent game = getPackageManager().getLaunchIntentForPackage("com.dts.freefireth"); if (game != null) startActivity(game); } catch (Exception e) {}
-                          finish();
+                          MediaProjectionManager mp = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                          startActivityForResult(mp.createScreenCaptureIntent(), REQ_CAPTURE);
                       }
                   });
+              }
+              protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req == REQ_OVERLAY && Settings.canDrawOverlays(this)) {
+                      MediaProjectionManager mp = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                      startActivityForResult(mp.createScreenCaptureIntent(), REQ_CAPTURE);
+                  } else if (req == REQ_CAPTURE && res == RESULT_OK) {
+                      // Inicia a captura
+                      Intent cap = new Intent(this, CaptureService.class);
+                      cap.putExtra("resultCode", res);
+                      cap.putExtra("data", data);
+                      startForegroundService(cap);
+                      
+                      // Inicia o painel
+                      startForegroundService(new Intent(this, OverlayService.class));
+                      
+                      // Abre o jogo com um pequeno delay para o Android processar a transmissão
+                      new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                          try { 
+                              Intent game = getPackageManager().getLaunchIntentForPackage("com.dts.freefireth"); 
+                              if (game != null) startActivity(game); 
+                          } catch (Exception e) {}
+                      }, 1000); // 1 segundo de delay
+                      
+                      finish();
+                  }
               }
           }
           EOF
           
           cat > app/src/main/java/com/aimbot/app/OverlayService.java <<'EOF'
           package com.aimbot.app;
-          import android.app.*; import android.content.*; import android.graphics.Color; import android.graphics.PixelFormat; import android.media.projection.MediaProjectionManager; import android.os.*; import android.view.*; import android.widget.*;
+          import android.app.*; import android.content.*; import android.graphics.Color; import android.graphics.PixelFormat; import android.os.*; import android.view.*; import android.widget.*;
           public class OverlayService extends Service {
               public static volatile boolean AIM_ON = false;
               private WindowManager wm;
@@ -124,17 +151,7 @@ jobs:
 
                   Switch sw = new Switch(this); sw.setText("CONTROLE ON/OFF"); sw.setTextColor(0xFFFFFFFF);
                   sw.setChecked(controlState);
-                  sw.setOnCheckedChangeListener((b, v) -> { 
-                      controlState = v; 
-                      AIM_ON = v; 
-                      if (v && CaptureService.isRunning == false) {
-                          // Pede a transmissão na hora que liga
-                          MediaProjectionManager mp = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-                          Intent intent = mp.createScreenCaptureIntent();
-                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                          startActivity(intent);
-                      }
-                  });
+                  sw.setOnCheckedChangeListener((b, v) -> { controlState = v; AIM_ON = v; });
                   box.addView(sw);
 
                   Button min = new Button(this); min.setText("MINIMIZAR"); min.setOnClickListener(v -> minimize());
@@ -187,9 +204,7 @@ jobs:
           package com.aimbot.app;
           import android.app.*; import android.content.*; import android.graphics.PixelFormat; import android.hardware.display.*; import android.media.Image; import android.media.ImageReader; import android.media.projection.*; import android.os.*; import android.util.DisplayMetrics; import android.view.WindowManager; import java.nio.ByteBuffer;
           public class CaptureService extends Service {
-              public static boolean isRunning = false;
               public int onStartCommand(Intent i, int f, int s) {
-                  isRunning = true;
                   DisplayMetrics m = new DisplayMetrics(); ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(m);
                   MediaProjection p = ((MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE)).getMediaProjection(i.getIntExtra("resultCode", 0), i.getParcelableExtra("data"));
                   ImageReader r = ImageReader.newInstance(m.widthPixels, m.heightPixels, PixelFormat.RGBA_8888, 2);
