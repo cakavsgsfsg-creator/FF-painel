@@ -108,17 +108,74 @@ jobs:
           
           cat > app/src/main/java/com/aimbot/app/OverlayService.java <<'EOF'
           package com.aimbot.app;
-          import android.app.*; import android.content.*; import android.graphics.PixelFormat; import android.os.*; import android.view.*; import android.widget.*;
+          import android.app.*; import android.content.*; import android.graphics.Color; import android.graphics.PixelFormat; import android.os.*; import android.view.*; import android.widget.*;
           public class OverlayService extends Service {
-              public static boolean AIM_ON = false;
+              public static volatile boolean AIM_ON = false;
+              private WindowManager wm;
+              private View panel;
+              private View bubble;
+              private WindowManager.LayoutParams panelParams;
+              private WindowManager.LayoutParams bubbleParams;
+              private boolean controlState = false; // Guarda o estado do switch
+
               public void onCreate() {
-                  WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-                  LinearLayout l = new LinearLayout(this); l.setOrientation(1); l.setBackgroundColor(0xEE1A1A1A); l.setPadding(40,40,40,40);
-                  Switch sw = new Switch(this); sw.setText("CONTROLE ON/OFF (AIMBOT)"); sw.setTextColor(0xFFFFFFFF); sw.setOnCheckedChangeListener((b, v) -> AIM_ON = v);
-                  Button bc = new Button(this); bc.setText("FECHAR"); bc.setOnClickListener(x -> stopSelf());
-                  l.addView(sw); l.addView(bc);
-                  wm.addView(l, new WindowManager.LayoutParams(-2, -2, 2038, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT));
+                  wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  showPanel();
               }
+
+              private void showPanel() {
+                  if (panel != null) return;
+
+                  LinearLayout box = new LinearLayout(this); box.setOrientation(1); box.setBackgroundColor(0xEE1A1A1A); box.setPadding(40,40,40,40);
+                  TextView title = new TextView(this); title.setText("EINBOT VIP"); title.setTextColor(0xFFD6A4FF); title.setTextSize(21); box.addView(title);
+
+                  Switch sw = new Switch(this); sw.setText("CONTROLE ON/OFF"); sw.setTextColor(0xFFFFFFFF);
+                  sw.setChecked(controlState); // Restaura o estado
+                  sw.setOnCheckedChangeListener((b, v) -> { controlState = v; AIM_ON = v; });
+                  box.addView(sw);
+
+                  Button min = new Button(this); min.setText("MINIMIZAR"); min.setOnClickListener(v -> minimize());
+                  box.addView(min);
+
+                  Button close = new Button(this); close.setText("FECHAR"); close.setOnClickListener(v -> removePanel());
+                  box.addView(close);
+
+                  panel = box;
+                  panelParams = new WindowManager.LayoutParams(-2, -2, 2038, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+                  panelParams.gravity = Gravity.TOP | Gravity.START; panelParams.x = 50; panelParams.y = 150;
+                  enableDrag(panel, panelParams);
+                  wm.addView(panel, panelParams);
+              }
+
+              private void minimize() {
+                  removePanel();
+                  if (bubble != null) return;
+                  TextView icon = new TextView(this); icon.setText("E"); icon.setTextColor(Color.WHITE); icon.setTextSize(22); icon.setGravity(Gravity.CENTER); icon.setBackgroundColor(0xFF762DB0);
+                  icon.setOnClickListener(v -> { removeBubble(); showPanel(); });
+                  bubble = icon;
+                  bubbleParams = new WindowManager.LayoutParams(150, 150, 2038, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+                  bubbleParams.gravity = Gravity.TOP | Gravity.START; bubbleParams.x = 50; bubbleParams.y = 150;
+                  enableDrag(bubble, bubbleParams);
+                  wm.addView(bubble, bubbleParams);
+              }
+
+              private void enableDrag(View view, WindowManager.LayoutParams params) {
+                  view.setOnTouchListener(new View.OnTouchListener() {
+                      int startX, startY; float touchX, touchY;
+                      public boolean onTouch(View v, MotionEvent event) {
+                          if (event.getAction() == MotionEvent.ACTION_DOWN) { startX = params.x; startY = params.y; touchX = event.getRawX(); touchY = event.getRawY(); return false; }
+                          if (event.getAction() == MotionEvent.ACTION_MOVE) {
+                              params.x = startX + (int)(event.getRawX() - touchX); params.y = startY + (int)(event.getRawY() - touchY);
+                              try { wm.updateViewLayout(view, params); } catch (Exception ignored) {}
+                              return true;
+                          }
+                          return false;
+                      }
+                  });
+              }
+
+              private void removePanel() { if (panel != null) { try { wm.removeView(panel); } catch (Exception ignored) {} panel = null; } }
+              private void removeBubble() { if (bubble != null) { try { wm.removeView(bubble); } catch (Exception ignored) {} bubble = null; } }
               public IBinder onBind(Intent i) { return null; }
           }
           EOF
